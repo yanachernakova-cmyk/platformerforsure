@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Arrow Key Character</title>
+    <title>Cat & Fish Hunt</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
         color-scheme: light;
@@ -19,7 +25,7 @@
         display: grid;
         place-items: center;
         background: #e6f7ff;
-        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        font-family: "Jersey 10", sans-serif;
         color: #1c1f2a;
       }
 
@@ -42,7 +48,7 @@
       }
 
       .hint {
-        font-size: 0.95rem;
+        font-size: 1.1rem;
         color: #5a6275;
       }
 
@@ -56,18 +62,8 @@
       }
 
       .stats {
-        display: flex;
-        gap: 16px;
-        flex-wrap: wrap;
-        font-size: 0.95rem;
+        font-size: 1.4rem;
         color: #3f465a;
-      }
-
-      .stats span {
-        background: #fff;
-        padding: 8px 12px;
-        border-radius: 999px;
-        border: 1px solid #d9deef;
       }
     </style>
   </head>
@@ -79,8 +75,6 @@
       </header>
       <canvas id="game" width="960" height="540"></canvas>
       <div class="stats">
-        <span id="pos">Position: 0, 0</span>
-        <span id="speed">Speed: 0</span>
         <span id="status">Fish: 0</span>
       </div>
     </div>
@@ -88,15 +82,13 @@
     <script>
       const canvas = document.getElementById("game");
       const ctx = canvas.getContext("2d");
-      const posLabel = document.getElementById("pos");
-      const speedLabel = document.getElementById("speed");
       const statusLabel = document.getElementById("status");
 
       const player = {
         x: canvas.width / 2,
         y: 0,
         radius: 18,
-        speed: 300,
+        speed: 350,
         sprintBoost: 1.6,
         color: "#ff7a59",
         vy: 0,
@@ -111,6 +103,7 @@
       const groundY = canvas.height - 70;
       const fallLimit = canvas.height + player.radius * 2;
       let isGameOver = false;
+      let isWin = false;
       const keys = new Set();
       let lastTime = 0;
       let cameraY = 0;
@@ -140,12 +133,28 @@
         platforms.push(createPlatform(0, groundY, canvas.width));
         highestPlatformY = groundY;
         score = 0;
+        isWin = false;
         updateScore();
         generatePlatforms();
       }
 
       function updateScore() {
         statusLabel.textContent = `Fish: ${score}`;
+      }
+
+      function endGame(message) {
+        isGameOver = true;
+        isWin = false;
+        statusLabel.textContent = `${message} Score: ${score}. Press R to retry.`;
+        stopBackgroundMusic();
+        playLoserSound();
+      }
+
+      function endWin() {
+        isGameOver = true;
+        isWin = true;
+        statusLabel.textContent = `Winner! Score: ${score}. Press R to retry.`;
+        stopBackgroundMusic();
       }
 
       function createSnack(x, y) {
@@ -266,7 +275,15 @@
             score += 1;
             updateScore();
             playSnackSound();
+            if (score >= targetScore) {
+              endWin();
+              break;
+            }
           }
+        }
+
+        if (isGameOver) {
+          return;
         }
 
         for (const bad of spoiledFish) {
@@ -274,9 +291,8 @@
           const dist = Math.hypot(player.x - bad.x, player.y - bad.y);
           if (dist < player.radius + bad.radius) {
             bad.active = false;
-            isGameOver = true;
-            statusLabel.textContent = "Status: Spoiled fish! Press R to retry.";
             playSpoiledSound();
+            endGame("Status: Spoiled fish!");
             break;
           }
         }
@@ -305,14 +321,9 @@
         }
 
         if (player.y - cameraY > canvas.height + player.radius) {
-          isGameOver = true;
-          statusLabel.textContent = "Status: Fell! Press R to retry.";
+          endGame("Status: Fell!");
         }
 
-        posLabel.textContent = `Position: ${Math.round(player.x)}, ${Math.round(
-          player.y
-        )}`;
-        speedLabel.textContent = `Speed: ${Math.round(velocity)}`;
       }
 
       function draw(time) {
@@ -378,6 +389,10 @@
         }
 
         drawCat(player.x, player.y - cameraY, player.radius, time);
+
+        if (isGameOver) {
+          drawGameOver();
+        }
       }
 
       function drawRoundedRect(x, y, width, height, radius) {
@@ -486,6 +501,14 @@
       }
 
       let audioCtx = null;
+      const bgMusic = new Audio("Fish Quest Feline.mp3");
+      bgMusic.loop = true;
+      bgMusic.volume = 0.5;
+      const gameOverImage = new Image();
+      gameOverImage.src = "ChatGPT Image Dec 23, 2025 at 12_34_59 AM.png";
+      const winnerImage = new Image();
+      winnerImage.src = "ChatGPT Image Dec 23, 2025 at 12_39_24 AM.png";
+      const targetScore = 20;
 
       function ensureAudio() {
         if (!audioCtx) {
@@ -513,6 +536,19 @@
         osc.stop(audioCtx.currentTime + duration);
       }
 
+      function startBackgroundMusic() {
+        if (bgMusic.paused) {
+          bgMusic.play();
+        }
+      }
+
+      function stopBackgroundMusic() {
+        if (!bgMusic.paused) {
+          bgMusic.pause();
+          bgMusic.currentTime = 0;
+        }
+      }
+
       function playJumpSound() {
         playTone({ freq: 520, duration: 0.15, type: "triangle", gain: 0.08 });
       }
@@ -525,6 +561,11 @@
         playTone({ freq: 180, duration: 0.3, type: "sawtooth", gain: 0.08 });
       }
 
+      function playLoserSound() {
+        playTone({ freq: 200, duration: 0.2, type: "square", gain: 0.1 });
+        playTone({ freq: 140, duration: 0.25, type: "square", gain: 0.08 });
+      }
+
       function loop(timestamp) {
         const delta = Math.min((timestamp - lastTime) / 1000, 0.03);
         lastTime = timestamp;
@@ -535,6 +576,7 @@
 
       window.addEventListener("keydown", (event) => {
         ensureAudio();
+        startBackgroundMusic();
         if (event.key.toLowerCase() === "r" && isGameOver) {
           resetPlayer();
         }
@@ -591,6 +633,95 @@
         ctx.moveTo(-bodyR * 0.1, bodyR * 0.05);
         ctx.quadraticCurveTo(0, bodyR * 0.15, bodyR * 0.1, bodyR * 0.05);
         ctx.stroke();
+
+        ctx.restore();
+      }
+
+      function drawGameOver() {
+        ctx.fillStyle = "rgba(10, 20, 30, 0.45)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2 - 40;
+        const overlayImage = isWin ? winnerImage : gameOverImage;
+        if (overlayImage.complete && overlayImage.naturalWidth > 0) {
+          const maxWidth = canvas.width * 0.45;
+          const maxHeight = canvas.height * 0.45;
+          const scale = Math.min(
+            maxWidth / overlayImage.naturalWidth,
+            maxHeight / overlayImage.naturalHeight
+          );
+          const drawW = overlayImage.naturalWidth * scale;
+          const drawH = overlayImage.naturalHeight * scale;
+          ctx.drawImage(
+            overlayImage,
+            centerX - drawW / 2,
+            centerY - drawH / 2,
+            drawW,
+            drawH
+          );
+        } else {
+          drawCryingCatFace(centerX, centerY, 70);
+        }
+
+        ctx.fillStyle = isWin ? "#2bb673" : "#ff2d2d";
+        ctx.font = "700 64px 'Jersey 10', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(`Score: ${score}`, centerX, centerY + 140);
+      }
+
+      function drawCryingCatFace(x, y, size) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        ctx.fillStyle = "#ff8f3d";
+        ctx.beginPath();
+        ctx.moveTo(-size * 0.6, -size * 0.55);
+        ctx.lineTo(-size * 0.15, -size * 1.05);
+        ctx.lineTo(-size * 0.05, -size * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(size * 0.6, -size * 0.55);
+        ctx.lineTo(size * 0.15, -size * 1.05);
+        ctx.lineTo(size * 0.05, -size * 0.4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.save();
+        ctx.translate(size * 1.0, size * 0.2);
+        ctx.rotate(0.4);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, size * 0.6, size * 0.32, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.fillStyle = "#ff8f3d";
+        ctx.beginPath();
+        ctx.arc(0, 0, size, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#1c1f2a";
+        ctx.beginPath();
+        ctx.ellipse(-size * 0.35, -size * 0.1, size * 0.16, size * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(size * 0.35, -size * 0.1, size * 0.16, size * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "#1c1f2a";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, size * 0.2, size * 0.22, 0, Math.PI);
+        ctx.stroke();
+
+        ctx.fillStyle = "#8fd3ff";
+        ctx.beginPath();
+        ctx.ellipse(-size * 0.35, size * 0.25, size * 0.08, size * 0.18, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(size * 0.35, size * 0.25, size * 0.08, size * 0.18, 0, 0, Math.PI * 2);
+        ctx.fill();
 
         ctx.restore();
       }
