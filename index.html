@@ -119,6 +119,7 @@
       const snacks = [];
       const spoiledFish = [];
       let score = 0;
+      let jumpQueued = false;
 
       function clamp(value, min, max) {
         return Math.min(Math.max(value, min), max);
@@ -193,6 +194,9 @@
         }
         if (isDown) {
           keys.add(key);
+          if (key === "ArrowUp") {
+            jumpQueued = true;
+          }
         } else {
           keys.delete(key);
         }
@@ -222,7 +226,6 @@
         const velocity = player.speed * sprint;
         let dx = 0;
         let onGround = false;
-        let jumpedThisFrame = false;
 
         if (keys.has("ArrowLeft")) dx -= 1;
         if (keys.has("ArrowRight")) dx += 1;
@@ -249,9 +252,10 @@
           }
         }
 
-        if (onGround && keys.has("ArrowUp")) {
+        if (onGround && jumpQueued) {
           player.vy = -player.jumpPower;
-          jumpedThisFrame = true;
+          jumpQueued = false;
+          playJumpSound();
         }
 
         for (const snack of snacks) {
@@ -277,9 +281,6 @@
           }
         }
 
-        if (jumpedThisFrame) {
-          playJumpSound();
-        }
 
         player.x = clamp(player.x, player.radius, canvas.width - player.radius);
         player.y = clamp(player.y, -Infinity, fallLimit);
