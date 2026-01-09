@@ -64,6 +64,40 @@
       .stats {
         font-size: 1.4rem;
         color: #3f465a;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .air {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1.1rem;
+        color: #2a4c63;
+      }
+
+      .air.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .air-bar {
+        width: 160px;
+        height: 14px;
+        border-radius: 999px;
+        border: 2px solid #2a6ea8;
+        background: rgba(255, 255, 255, 0.8);
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(42, 110, 168, 0.15);
+      }
+
+      .air-fill {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #78e6ff 0%, #3fa9f5 100%);
+        transition: width 120ms linear;
       }
     </style>
   </head>
@@ -71,11 +105,19 @@
     <div class="wrap">
       <header>
         <h1>Cat & Fish Hunt</h1>
-        <div class="hint">Use ← → to move. ↑ to jump. Shift to sprint.</div>
+        <div class="hint">
+          Use ← → to move. ↑ to jump. Shift to sprint. Level 2: ↑ ↓ to swim, surface for air.
+        </div>
       </header>
       <canvas id="game" width="960" height="540"></canvas>
       <div class="stats">
         <span id="status">Fish: 0</span>
+        <div class="air hidden" id="airHud">
+          <span>Air</span>
+          <div class="air-bar">
+            <div class="air-fill" id="airFill"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -83,19 +125,26 @@
       const canvas = document.getElementById("game");
       const ctx = canvas.getContext("2d");
       const statusLabel = document.getElementById("status");
+      const airHud = document.getElementById("airHud");
+      const airFill = document.getElementById("airFill");
 
       const player = {
         x: canvas.width / 2,
         y: 0,
         radius: 18,
-        speed: 350,
+        speed: 420,
         sprintBoost: 1.6,
         color: "#ff7a59",
+        vx: 0,
         vy: 0,
         jumpPower: 520,
       };
 
       const gravity = 1400;
+      const waterGravity = 220;
+      const swimAccel = 620;
+      const waterDrag = 0.9;
+      const waterSurfaceY = canvas.height * 0.32;
       const platform = {
         width: 180,
         height: 18,
@@ -112,7 +161,13 @@
       const snacks = [];
       const spoiledFish = [];
       let score = 0;
+      let level = 1;
+      let oxygen = 0;
+      const maxOxygen = 10;
+      const targetScoreLevel1 = 10;
+      const targetScoreLevel2 = 14;
       let jumpQueued = false;
+      let gameTime = 0;
 
       function clamp(value, min, max) {
         return Math.min(Math.max(value, min), max);
@@ -134,12 +189,21 @@
         highestPlatformY = groundY;
         score = 0;
         isWin = false;
+        oxygen = maxOxygen;
         updateScore();
         generatePlatforms();
       }
 
       function updateScore() {
-        statusLabel.textContent = `Fish: ${score}`;
+        if (level === 2) {
+          statusLabel.textContent = `Level 2 • Fish: ${score}`;
+          airHud.classList.remove("hidden");
+          const ratio = clamp(oxygen / maxOxygen, 0, 1);
+          airFill.style.width = `${ratio * 100}%`;
+          return;
+        }
+        statusLabel.textContent = `Level 1 • Fish: ${score}`;
+        airHud.classList.add("hidden");
       }
 
       function endGame(message) {
@@ -158,11 +222,33 @@
       }
 
       function createSnack(x, y) {
-        return { x, y, radius: 9, collected: false };
+        return {
+          x,
+          y,
+          baseX: x,
+          baseY: y,
+          radius: 9,
+          collected: false,
+          driftX: randBetween(30, 70),
+          driftY: randBetween(8, 22),
+          driftSpeed: randBetween(0.9, 1.6),
+          phase: randBetween(0, Math.PI * 2),
+        };
       }
 
       function createSpoiledFish(x, y) {
-        return { x, y, radius: 10, active: true };
+        return {
+          x,
+          y,
+          baseX: x,
+          baseY: y,
+          radius: 10,
+          active: true,
+          driftX: randBetween(26, 60),
+          driftY: randBetween(10, 26),
+          driftSpeed: randBetween(1.0, 1.8),
+          phase: randBetween(0, Math.PI * 2),
+        };
       }
 
       function generatePlatforms() {
@@ -196,6 +282,43 @@
         }
       }
 
+      function seedUnderwaterLevel() {
+        platforms.length = 0;
+        snacks.length = 0;
+        spoiledFish.length = 0;
+        score = 0;
+        oxygen = maxOxygen;
+        isWin = false;
+        cameraY = 0;
+        const platformY = waterSurfaceY + 90;
+        const secondY = waterSurfaceY + 170;
+        platforms.push(createPlatform(40, platformY, 240));
+        platforms.push(createPlatform(360, platformY + 20, 200));
+        platforms.push(createPlatform(640, platformY - 10, 220));
+        platforms.push(createPlatform(140, secondY, 200));
+        platforms.push(createPlatform(460, secondY + 30, 220));
+
+        for (let i = 0; i < 16; i += 1) {
+          const x = randBetween(70, canvas.width - 70);
+          const y = randBetween(waterSurfaceY + 150, canvas.height - 70);
+          snacks.push(createSnack(x, y));
+        }
+
+        for (let i = 0; i < platforms.length; i += 2) {
+          const plat = platforms[i];
+          const hazardX = clamp(plat.x + plat.width * 0.5, 60, canvas.width - 60);
+          const hazardY = Math.min(canvas.height - 60, plat.y + 50);
+          spoiledFish.push(createSpoiledFish(hazardX, hazardY));
+        }
+
+        for (let i = 0; i < 2; i += 1) {
+          const x = randBetween(60, canvas.width - 60);
+          const y = randBetween(waterSurfaceY + 120, canvas.height - 80);
+          spoiledFish.push(createSpoiledFish(x, y));
+        }
+        updateScore();
+      }
+
       function handleKey(event, isDown) {
         const key = event.key;
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Shift"].includes(key)) {
@@ -216,12 +339,17 @@
 
       function resetPlayer() {
         player.x = canvas.width / 2;
-        player.y = groundY - player.radius;
+        player.y = level === 2 ? waterSurfaceY - player.radius - 4 : groundY - player.radius;
+        player.vx = 0;
         player.vy = 0;
         isGameOver = false;
         statusLabel.textContent = "Fish: 0";
         cameraY = 0;
-        seedPlatforms();
+        if (level === 2) {
+          seedUnderwaterLevel();
+        } else {
+          seedPlatforms();
+        }
       }
 
       resetPlayer();
@@ -231,40 +359,77 @@
           return;
         }
 
-        const sprint = keys.has("Shift") ? player.sprintBoost : 1;
-        const velocity = player.speed * sprint;
-        let dx = 0;
-        let onGround = false;
-
-        if (keys.has("ArrowLeft")) dx -= 1;
-        if (keys.has("ArrowRight")) dx += 1;
-
-        player.x += dx * velocity * delta;
-        player.vy += gravity * delta;
-        player.y += player.vy * delta;
-
-        const prevY = player.y - player.vy * delta;
-
-        for (const plat of platforms) {
-          const withinX =
-            player.x + player.radius > plat.x &&
-            player.x - player.radius < plat.x + plat.width;
-          const hitTop =
-            player.vy >= 0 &&
-            prevY + player.radius <= plat.y &&
-            player.y + player.radius >= plat.y;
-          if (withinX && hitTop) {
-            player.y = plat.y - player.radius;
-            player.vy = 0;
-            onGround = true;
-            break;
-          }
+        gameTime += delta;
+        if (level === 2) {
+          updateFishMotion(gameTime);
         }
 
-        if (onGround && jumpQueued) {
-          player.vy = -player.jumpPower;
-          jumpQueued = false;
-          playJumpSound();
+        if (level === 1) {
+          const sprint = keys.has("Shift") ? player.sprintBoost : 1;
+          const velocity = player.speed * sprint;
+          let dx = 0;
+          let onGround = false;
+
+          if (keys.has("ArrowLeft")) dx -= 1;
+          if (keys.has("ArrowRight")) dx += 1;
+
+          player.x += dx * velocity * delta;
+          player.vy += gravity * delta;
+          player.y += player.vy * delta;
+
+          const prevY = player.y - player.vy * delta;
+
+          for (const plat of platforms) {
+            const withinX =
+              player.x + player.radius > plat.x &&
+              player.x - player.radius < plat.x + plat.width;
+            const hitTop =
+              player.vy >= 0 &&
+              prevY + player.radius <= plat.y &&
+              player.y + player.radius >= plat.y;
+            if (withinX && hitTop) {
+              player.y = plat.y - player.radius;
+              player.vy = 0;
+              onGround = true;
+              break;
+            }
+          }
+
+          if (onGround && jumpQueued) {
+            player.vy = -player.jumpPower;
+            jumpQueued = false;
+            playJumpSound();
+          }
+        } else {
+          let ax = 0;
+          let ay = 0;
+
+          if (keys.has("ArrowLeft")) ax -= 1;
+          if (keys.has("ArrowRight")) ax += 1;
+          if (keys.has("ArrowUp")) ay -= 1;
+          if (keys.has("ArrowDown")) ay += 1;
+
+          const surfaceBoost = keys.has("ArrowUp") ? 1.35 : 1;
+
+          player.vx += ax * swimAccel * delta;
+          player.vy += ay * swimAccel * delta * surfaceBoost;
+          player.vy += waterGravity * delta;
+          player.vx *= waterDrag;
+          player.vy *= waterDrag;
+
+          player.x += player.vx * delta;
+          player.y += player.vy * delta;
+
+          if (player.y > waterSurfaceY + player.radius) {
+            oxygen = Math.max(0, oxygen - delta);
+          } else {
+            oxygen = Math.min(maxOxygen, oxygen + delta * 1.4);
+          }
+          updateScore();
+          if (oxygen <= 0) {
+            endGame("Status: Out of air!");
+            return;
+          }
         }
 
         for (const snack of snacks) {
@@ -275,7 +440,12 @@
             score += 1;
             updateScore();
             playSnackSound();
-            if (score >= targetScore) {
+            if (level === 1 && score >= targetScoreLevel1) {
+              level = 2;
+              resetPlayer();
+              return;
+            }
+            if (level === 2 && score >= targetScoreLevel2) {
               endWin();
               break;
             }
@@ -298,42 +468,63 @@
         }
 
 
-        player.x = clamp(player.x, player.radius, canvas.width - player.radius);
-        player.y = clamp(player.y, -Infinity, fallLimit);
+        if (level === 1) {
+          player.x = clamp(player.x, player.radius, canvas.width - player.radius);
+          player.y = clamp(player.y, -Infinity, fallLimit);
 
-        cameraY = Math.min(cameraY, player.y - canvas.height * 0.6);
-        generatePlatforms();
+          cameraY = Math.min(cameraY, player.y - canvas.height * 0.6);
+          generatePlatforms();
 
-        while (
-          platforms.length &&
-          platforms[0].y - cameraY > canvas.height + 600
-        ) {
-          platforms.shift();
-        }
-        while (snacks.length && snacks[0].y - cameraY > canvas.height + 600) {
-          snacks.shift();
-        }
-        while (
-          spoiledFish.length &&
-          spoiledFish[0].y - cameraY > canvas.height + 600
-        ) {
-          spoiledFish.shift();
-        }
+          while (
+            platforms.length &&
+            platforms[0].y - cameraY > canvas.height + 600
+          ) {
+            platforms.shift();
+          }
+          while (snacks.length && snacks[0].y - cameraY > canvas.height + 600) {
+            snacks.shift();
+          }
+          while (
+            spoiledFish.length &&
+            spoiledFish[0].y - cameraY > canvas.height + 600
+          ) {
+            spoiledFish.shift();
+          }
 
-        if (player.y - cameraY > canvas.height + player.radius) {
-          endGame("Status: Fell!");
+          if (player.y - cameraY > canvas.height + player.radius) {
+            endGame("Status: Fell!");
+          }
+        } else {
+          player.x = clamp(player.x, player.radius, canvas.width - player.radius);
+          player.y = clamp(player.y, player.radius, canvas.height - player.radius);
         }
+      }
 
+      function updateFishMotion(time) {
+        for (const snack of snacks) {
+          if (snack.collected) continue;
+          snack.x = snack.baseX + Math.sin(time * snack.driftSpeed + snack.phase) * snack.driftX;
+          snack.y = snack.baseY + Math.cos(time * snack.driftSpeed + snack.phase) * snack.driftY;
+        }
+        for (const bad of spoiledFish) {
+          if (!bad.active) continue;
+          bad.x = bad.baseX + Math.cos(time * bad.driftSpeed + bad.phase) * bad.driftX;
+          bad.y = bad.baseY + Math.sin(time * bad.driftSpeed + bad.phase) * bad.driftY;
+        }
       }
 
       function draw(time) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        drawBackground();
+        if (level === 2) {
+          drawUnderwaterBackground();
+        } else {
+          drawBackground();
+        }
 
         ctx.fillStyle = "#6b4b33";
         for (const plat of platforms) {
-          const y = plat.y - cameraY;
+          const y = level === 2 ? plat.y : plat.y - cameraY;
           if (y > canvas.height || y + plat.height < -40) continue;
           drawRoundedRect(plat.x, y, plat.width, plat.height, 10);
           ctx.fill();
@@ -343,7 +534,7 @@
         ctx.fillStyle = "#58b7ff";
         for (const snack of snacks) {
           if (snack.collected) continue;
-          const y = snack.y - cameraY;
+          const y = level === 2 ? snack.y : snack.y - cameraY;
           if (y > canvas.height || y + snack.radius < -40) continue;
           ctx.beginPath();
           ctx.ellipse(snack.x, y, snack.radius + 3, snack.radius, 0, 0, Math.PI * 2);
@@ -364,7 +555,7 @@
         ctx.fillStyle = "#7b5f86";
         for (const bad of spoiledFish) {
           if (!bad.active) continue;
-          const y = bad.y - cameraY;
+          const y = level === 2 ? bad.y : bad.y - cameraY;
           if (y > canvas.height || y + bad.radius < -40) continue;
           ctx.beginPath();
           ctx.ellipse(bad.x, y, bad.radius + 4, bad.radius, 0, 0, Math.PI * 2);
@@ -388,7 +579,7 @@
           ctx.fillStyle = "#7b5f86";
         }
 
-        drawCat(player.x, player.y - cameraY, player.radius, time);
+        drawCat(player.x, level === 2 ? player.y : player.y - cameraY, player.radius, time);
 
         if (isGameOver) {
           drawGameOver();
@@ -433,6 +624,71 @@
         ctx.fillStyle = "#9ad17d";
         ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
         drawMeadow(groundY);
+      }
+
+      function drawUnderwaterBackground() {
+        const sky = ctx.createLinearGradient(0, 0, 0, waterSurfaceY);
+        sky.addColorStop(0, "#b6f1ff");
+        sky.addColorStop(1, "#fff1c7");
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, canvas.width, waterSurfaceY);
+
+        const sandHeight = 36;
+        ctx.fillStyle = "#f4d08a";
+        ctx.fillRect(0, waterSurfaceY - sandHeight, canvas.width, sandHeight);
+        ctx.fillStyle = "#efc170";
+        for (let i = 0; i < canvas.width; i += 70) {
+          ctx.beginPath();
+          ctx.ellipse(i + 20, waterSurfaceY - 12, 18, 6, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        drawPalm(canvas.width * 0.18, waterSurfaceY - sandHeight + 6);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.fillRect(0, waterSurfaceY - 6, canvas.width, 8);
+
+        const depth = ctx.createLinearGradient(0, waterSurfaceY, 0, canvas.height);
+        depth.addColorStop(0, "#6bd1ff");
+        depth.addColorStop(0.4, "#2c8ac7");
+        depth.addColorStop(1, "#0f3f6e");
+        ctx.fillStyle = depth;
+        ctx.fillRect(0, waterSurfaceY, canvas.width, canvas.height - waterSurfaceY);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+        for (let i = 0; i < 18; i += 1) {
+          const x = (i * 80 + performance.now() * 0.02) % (canvas.width + 80) - 40;
+          const y = waterSurfaceY + (i * 60 + performance.now() * 0.04) % (canvas.height + 120) - 60;
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function drawPalm(x, y) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        ctx.strokeStyle = "#a46a2d";
+        ctx.lineWidth = 10;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(20, -40, 12, -84);
+        ctx.stroke();
+
+        ctx.fillStyle = "#3fa85a";
+        for (let i = 0; i < 5; i += 1) {
+          ctx.save();
+          ctx.translate(12, -84);
+          ctx.rotate(-0.9 + i * 0.45);
+          ctx.beginPath();
+          ctx.ellipse(34, 0, 40, 12, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        ctx.restore();
       }
 
       function drawCloud(x, y, size) {
@@ -508,7 +764,6 @@
       gameOverImage.src = "ChatGPT Image Dec 23, 2025 at 12_34_59 AM.png";
       const winnerImage = new Image();
       winnerImage.src = "ChatGPT Image Dec 23, 2025 at 12_39_24 AM.png";
-      const targetScore = 20;
 
       function ensureAudio() {
         if (!audioCtx) {
@@ -578,6 +833,7 @@
         ensureAudio();
         startBackgroundMusic();
         if (event.key.toLowerCase() === "r" && isGameOver) {
+          level = 1;
           resetPlayer();
         }
       });
