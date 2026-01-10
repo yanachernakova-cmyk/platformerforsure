@@ -136,7 +136,7 @@
       <header>
         <h1>Cat & Fish Hunt</h1>
         <div class="hint">
-          Use ← → to move. ↑ to jump. Shift to sprint. Level 2: ↑ ↓ to swim, surface for air. Level 3: ride the wind. Level 4: keep your glow with fireflies. Press 1/2/3/4 to jump to a level.
+          Use ← → to move. ↑ to jump. Shift to sprint. Level 2: ↑ ↓ to swim, surface for air. Level 3: catch falling fish. Level 4: keep your glow with fireflies. Press 1/2/3/4 to jump to a level.
         </div>
       </header>
       <canvas id="game" width="960" height="540"></canvas>
@@ -213,6 +213,10 @@
       let glow = 0;
       const maxGlow = 10;
       let lightRadius = 120;
+      let isTransition = false;
+      let transitionTimer = 0;
+      let pendingLevel = 1;
+      let transitionMessage = "";
       const targetScoreLevel1 = 10;
       const targetScoreLevel2 = 10;
       const targetScoreLevel3 = 10;
@@ -290,6 +294,13 @@
         isWin = true;
         statusLabel.textContent = `Winner! Score: ${score}. Press R to retry.`;
         stopBackgroundMusic();
+      }
+
+      function startTransition(nextLevel, message) {
+        isTransition = true;
+        transitionTimer = 1.4;
+        pendingLevel = nextLevel;
+        transitionMessage = message;
       }
 
       function createSnack(x, y) {
@@ -422,27 +433,22 @@
         isWin = false;
         cameraY = 0;
 
-        platforms.push(createPlatform(0, canvas.height - 70, canvas.width));
-        platforms.push(createPlatform(120, canvas.height - 190, 180));
-        platforms.push(createPlatform(560, canvas.height - 210, 160));
-        platforms.push(createPlatform(320, canvas.height - 300, 200));
-        platforms.push(createPlatform(60, canvas.height - 360, 150));
-        platforms.push(createPlatform(680, canvas.height - 360, 160));
+        platforms.push(createPlatform(0, groundY, canvas.width));
 
-        movingPlatforms.push(createMovingPlatform(240, canvas.height - 140, 160, 60, 0.9));
-        movingPlatforms.push(createMovingPlatform(520, canvas.height - 260, 140, 90, 1.2));
-        movingPlatforms.push(createMovingPlatform(380, canvas.height - 400, 150, 110, 1.0));
-
-        for (let i = 0; i < 14; i += 1) {
-          const x = randBetween(80, canvas.width - 80);
-          const y = randBetween(120, canvas.height - 140);
-          snacks.push(createSnack(x, y));
+        for (let i = 0; i < 12; i += 1) {
+          const x = randBetween(60, canvas.width - 60);
+          const y = randBetween(-400, -40);
+          const snack = createSnack(x, y);
+          snack.fallSpeed = randBetween(160, 240);
+          snacks.push(snack);
         }
 
-        for (let i = 0; i < 5; i += 1) {
-          const x = randBetween(90, canvas.width - 90);
-          const y = randBetween(140, canvas.height - 120);
-          spoiledFish.push(createSpoiledFish(x, y));
+        for (let i = 0; i < 12; i += 1) {
+          const x = randBetween(60, canvas.width - 60);
+          const y = randBetween(-500, -60);
+          const bad = createSpoiledFish(x, y);
+          bad.fallSpeed = randBetween(180, 260);
+          spoiledFish.push(bad);
         }
 
         updateScore();
@@ -529,7 +535,7 @@
         if (level === 2) {
           player.y = waterSurfaceY - player.radius - 4;
         } else if (level === 3) {
-          player.y = canvas.height - 110;
+          player.y = groundY - player.radius;
         } else if (level === 4) {
           player.y = canvas.height - 110;
         } else {
@@ -558,11 +564,24 @@
           return;
         }
 
+        if (isTransition) {
+          transitionTimer -= delta;
+          if (transitionTimer <= 0) {
+            isTransition = false;
+            level = pendingLevel;
+            resetPlayer();
+          }
+          return;
+        }
+
         gameTime += delta;
-        if (level >= 2) {
+        if (level === 2 || level === 4) {
           updateFishMotion(gameTime);
         }
-        if (level === 3 || level === 4) {
+        if (level === 3) {
+          updateFallingFish(delta);
+        }
+        if (level === 4) {
           updateMovingPlatforms(gameTime);
         }
 
@@ -635,46 +654,31 @@
         } else if (level === 3) {
           const sprint = keys.has("Shift") ? player.sprintBoost : 1;
           const velocity = player.speed * sprint;
-          const wind = Math.sin(gameTime * 0.6) * skyWindStrength;
           let dx = 0;
-          let onGround = false;
-          let ridingPlatform = null;
 
           if (keys.has("ArrowLeft")) dx -= 1;
           if (keys.has("ArrowRight")) dx += 1;
 
-          player.x += (dx * velocity + wind) * delta;
+          player.x += dx * velocity * delta;
           player.vy += skyGravity * delta;
           player.y += player.vy * delta;
 
           const prevY = player.y - player.vy * delta;
-
-          for (const plat of platforms.concat(movingPlatforms)) {
+          const ground = platforms[0];
+          if (ground) {
             const withinX =
-              player.x + player.radius > plat.x &&
-              player.x - player.radius < plat.x + plat.width;
+              player.x + player.radius > ground.x &&
+              player.x - player.radius < ground.x + ground.width;
             const hitTop =
               player.vy >= 0 &&
-              prevY + player.radius <= plat.y &&
-              player.y + player.radius >= plat.y;
+              prevY + player.radius <= ground.y &&
+              player.y + player.radius >= ground.y;
             if (withinX && hitTop) {
-              player.y = plat.y - player.radius;
+              player.y = ground.y - player.radius;
               player.vy = 0;
-              onGround = true;
-              ridingPlatform = plat;
-              break;
             }
           }
-
-          if (onGround && jumpQueued) {
-            player.vy = -skyJumpPower;
-            jumpQueued = false;
-            playJumpSound();
-          }
-
-          if (onGround && ridingPlatform && ridingPlatform.moveVX) {
-            player.x += ridingPlatform.moveVX * delta;
-          }
+          jumpQueued = false;
         } else {
           const sprint = keys.has("Shift") ? player.sprintBoost : 1;
           const glowSlow = glow <= 2 ? 0.75 : 1;
@@ -732,23 +736,25 @@
             continue;
           }
           if (dist < player.radius + snack.radius) {
-            snack.collected = true;
+            if (level === 3) {
+              snack.x = randBetween(60, canvas.width - 60);
+              snack.y = randBetween(-420, -60);
+            } else {
+              snack.collected = true;
+            }
             score += 1;
             updateScore();
             playSnackSound();
             if (level === 1 && score >= targetScoreLevel1) {
-              level = 2;
-              resetPlayer();
+              startTransition(2, "Level 2: Dive time!");
               return;
             }
             if (level === 2 && score >= targetScoreLevel2) {
-              level = 3;
-              resetPlayer();
+              startTransition(3, "Level 3: Fish rain!");
               return;
             }
             if (level === 3 && score >= targetScoreLevel3) {
-              level = 4;
-              resetPlayer();
+              startTransition(4, "Level 4: Night glow!");
               return;
             }
             if (level === 4 && score >= targetScoreLevel4) {
@@ -834,6 +840,25 @@
           if (orb.collected) continue;
           orb.x = orb.baseX + Math.sin(time * orb.driftSpeed + orb.phase) * orb.driftX;
           orb.y = orb.baseY + Math.cos(time * orb.driftSpeed + orb.phase) * orb.driftY;
+        }
+      }
+
+      function updateFallingFish(delta) {
+        for (const snack of snacks) {
+          if (snack.collected) continue;
+          snack.y += snack.fallSpeed * delta;
+          if (snack.y - snack.radius > canvas.height + 20) {
+            snack.y = randBetween(-420, -60);
+            snack.x = randBetween(60, canvas.width - 60);
+          }
+        }
+        for (const bad of spoiledFish) {
+          if (!bad.active) continue;
+          bad.y += bad.fallSpeed * delta;
+          if (bad.y - bad.radius > canvas.height + 20) {
+            bad.y = randBetween(-520, -80);
+            bad.x = randBetween(60, canvas.width - 60);
+          }
         }
       }
 
@@ -949,6 +974,10 @@
 
         if (isGameOver) {
           drawGameOver();
+        }
+
+        if (isTransition) {
+          drawTransition();
         }
       }
 
@@ -1119,6 +1148,19 @@
         ctx.beginPath();
         ctx.arc(player.x, player.y, lightRadius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+      }
+
+      function drawTransition() {
+        ctx.save();
+        ctx.fillStyle = "rgba(8, 12, 24, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.font = "700 58px 'Jersey 10', sans-serif";
+        ctx.fillText("Level Complete!", canvas.width / 2, canvas.height / 2 - 20);
+        ctx.font = "500 36px 'Jersey 10', sans-serif";
+        ctx.fillText(transitionMessage, canvas.width / 2, canvas.height / 2 + 30);
         ctx.restore();
       }
 
